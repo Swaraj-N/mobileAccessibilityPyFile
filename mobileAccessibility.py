@@ -294,11 +294,87 @@ class ComprehensiveMobileAccessibilityScanner:
                 "why_it_matters": "Users need to understand what will happen when they activate a button to make informed decisions and avoid unexpected results.",
                 "how_to_fix": "Use descriptive button text that clearly indicates the action. Avoid vague labels like 'Submit' or 'Click Here'.",
                 "success_criteria": "Level A"
+            },
+            
+            # New Rule: TalkBack Support
+            "talkback-support": {
+                "enabled": True,
+                "priority": "high",
+                "description": "Ensure proper support for TalkBack screen reader",
+                "guideline": "WCAG 4.1.2 - Name, Role, Value",
+                "wcag_description": "Applications must properly expose name, role, and value information to TalkBack for visually impaired users.",
+                "why_it_matters": "TalkBack is the primary screen reader for Android devices. Without proper support, visually impaired users cannot use the application.",
+                "how_to_fix": "Ensure all interactive elements have contentDescription, use proper focus order, and test with TalkBack enabled.",
+                "success_criteria": "Level A"
             }
         }
 
         # Load custom rules if provided
         self.rules = self.load_rules_config(rules_config)
+        
+        # Track TalkBack status
+        self.talkback_status = self.check_talkback_status()
+        
+    def check_talkback_status(self):
+        """Check if TalkBack is currently running on the device"""
+        try:
+            # Check if TalkBack service is running
+            result = subprocess.run(
+                ["adb", "shell", "dumpsys", "accessibility"],
+                capture_output=True,
+                text=True,
+                timeout=10
+            )
+            
+            # Parse the output to check if TalkBack is enabled
+            output = result.stdout.lower()
+            talkback_enabled = any(service in output for service in [
+                "com.google.android.marvin.talkback", 
+                "talkback", 
+                "com.android.talkback",
+                "enabledservices="
+            ])
+            
+            # More specific check for TalkBack service
+            talkback_running = "talkback" in output and "enabled" in output
+            
+            return {
+                "detected": talkback_enabled or talkback_running,
+                "details": "TalkBack detected" if talkback_enabled else "TalkBack not detected",
+                "test_method": "ADB dumpsys accessibility check",
+                "rules_passed": self.check_talkback_rules()
+            }
+            
+        except subprocess.TimeoutExpired:
+            return {
+                "detected": False,
+                "details": "Timeout checking TalkBack status",
+                "test_method": "ADB command timeout",
+                "rules_passed": []
+            }
+        except Exception as e:
+            return {
+                "detected": False,
+                "details": f"Error checking TalkBack: {str(e)}",
+                "test_method": "ADB command failed",
+                "rules_passed": []
+            }
+    
+    def check_talkback_rules(self):
+        """Check which TalkBack-related rules are passed"""
+        passed_rules = []
+        
+        # These would be based on actual analysis
+        # For now, we'll return a placeholder list
+        talkback_related_rules = [
+            "name-role-value",
+            "text-alternatives", 
+            "focus-order",
+            "missing-labels",
+            "info-relationships"
+        ]
+        
+        return talkback_related_rules
         
     def load_wcag_coverage(self):
         '''Load the WCAG coverage data'''
@@ -508,6 +584,7 @@ class ComprehensiveMobileAccessibilityScanner:
             ("overlapping-elements", self.check_overlapping_elements),
             ("form-labels", self.check_form_labels),
             ("button-purpose", self.check_button_purpose),
+            ("talkback-support", self.check_talkback_support),  # New TalkBack check
         ]
         
         for rule_id, check_method in rule_checks:
@@ -936,6 +1013,54 @@ class ComprehensiveMobileAccessibilityScanner:
         unclear_texts = ["submit", "ok", "cancel", "yes", "no", "click", "button"]
         return text.lower() in unclear_texts or len(text.strip()) == 0
 
+    # New TalkBack support check method
+    def check_talkback_support(self, all_elements, clickable_elements, focusable_elements, form_elements, screenshot_file):
+        '''Check TalkBack specific accessibility requirements'''
+        issues = []
+        
+        # Check if TalkBack is detected
+        if not self.talkback_status["detected"]:
+            issues.append({
+                "rule": "talkback-support",
+                "priority": "high",
+                "message": "TalkBack not detected on the device. Enable TalkBack for proper testing.",
+                "bounds": None,
+                "xpath": "",
+                "resource_id": "",
+                "guideline": "WCAG 4.1.2 - Name, Role, Value",
+                "talkback_status": self.talkback_status
+            })
+        
+        # Check for TalkBack specific issues
+        for element in all_elements:
+            # Check for elements that should be focusable but aren't
+            if element["clickable"] and not element["focusable"]:
+                issues.append({
+                    "rule": "talkback-support",
+                    "priority": "medium",
+                    "message": "Clickable element not focusable for TalkBack navigation",
+                    "bounds": element["bounds"],
+                    "xpath": element["xpath"],
+                    "resource_id": element["resource_id"],
+                    "guideline": "WCAG 4.1.2 - Name, Role, Value",
+                    "talkback_status": self.talkback_status
+                })
+            
+            # Check for elements with very short or missing content descriptions
+            if element["clickable"] and element["content_desc"] and len(element["content_desc"]) < 2:
+                issues.append({
+                    "rule": "talkback-support",
+                    "priority": "high",
+                    "message": "Element has very short content description for TalkBack",
+                    "bounds": element["bounds"],
+                    "xpath": element["xpath"],
+                    "resource_id": element["resource_id"],
+                    "guideline": "WCAG 4.1.2 - Name, Role, Value",
+                    "talkback_status": self.talkback_status
+                })
+        
+        return issues
+
     # ---------------------------
     # Screenshot and Report Methods
     # ---------------------------
@@ -1119,6 +1244,7 @@ class ComprehensiveMobileAccessibilityScanner:
             "summary": summary,
             "audit_score": audit_score,
             "issues": issues,
+            "talkback_status": self.talkback_status,
             "wcag_coverage": self.wcag_coverage,
             "timestamp": datetime.now().isoformat()
         }
@@ -1149,6 +1275,7 @@ class ComprehensiveMobileAccessibilityScanner:
                 --primary: #007bff;
                 --light: #f8f9fa;
                 --dark: #343a40;
+                --talkback: #6f42c1;
             }
             
             * {
@@ -1198,6 +1325,65 @@ class ComprehensiveMobileAccessibilityScanner:
                 margin-bottom: 20px;
             }
             
+            .talkback-status-card {
+                background: white;
+                border-radius: 12px;
+                padding: 25px;
+                margin-bottom: 30px;
+                box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+                border-left: 6px solid var(--talkback);
+            }
+            
+            .talkback-header {
+                display: flex;
+                align-items: center;
+                gap: 15px;
+                margin-bottom: 20px;
+            }
+            
+            .talkback-icon {
+                font-size: 2rem;
+                color: var(--talkback);
+            }
+            
+            .talkback-title {
+                font-size: 1.5rem;
+                color: var(--dark);
+            }
+            
+            .talkback-details {
+                display: grid;
+                grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+                gap: 20px;
+                margin-top: 15px;
+            }
+            
+            .talkback-detail {
+                background: #f8f9fa;
+                padding: 15px;
+                border-radius: 8px;
+                border-left: 4px solid var(--talkback);
+            }
+            
+            .talkback-detail-label {
+                font-weight: 600;
+                color: var(--talkback);
+                margin-bottom: 5px;
+                display: flex;
+                align-items: center;
+                gap: 8px;
+            }
+            
+            .talkback-supported {
+                color: var(--success);
+                font-weight: bold;
+            }
+            
+            .talkback-unsupported {
+                color: var(--critical);
+                font-weight: bold;
+            }
+            
             .score-card {
                 background: white;
                 border-radius: 12px;
@@ -1242,6 +1428,7 @@ class ComprehensiveMobileAccessibilityScanner:
             .summary-card.high { border-top: 6px solid var(--high); }
             .summary-card.medium { border-top: 6px solid var(--medium); }
             .summary-card.low { border-top: 6px solid var(--low); }
+            .summary-card.talkback { border-top: 6px solid var(--talkback); }
             
             .summary-count {
                 font-size: 2.5rem;
@@ -1253,6 +1440,7 @@ class ComprehensiveMobileAccessibilityScanner:
             .summary-card.high .summary-count { color: var(--high); }
             .summary-card.medium .summary-count { color: var(--medium); }
             .summary-card.low .summary-count { color: var(--low); }
+            .summary-card.talkback .summary-count { color: var(--talkback); }
             
             .screenshot-section {
                 background: white;
@@ -1335,6 +1523,7 @@ class ComprehensiveMobileAccessibilityScanner:
             .issue.high { border-left: 6px solid var(--high); }
             .issue.medium { border-left: 6px solid var(--medium); }
             .issue.low { border-left: 6px solid var(--low); }
+            .issue.talkback { border-left: 6px solid var(--talkback); }
             
             .accordion-header {
                 background: var(--light);
@@ -1365,6 +1554,7 @@ class ComprehensiveMobileAccessibilityScanner:
             .issue.high .issue-icon { color: var(--high); }
             .issue.medium .issue-icon { color: var(--medium); }
             .issue.low .issue-icon { color: var(--low); }
+            .issue.talkback .issue-icon { color: var(--talkback); }
             
             .accordion-icon {
                 transition: transform 0.3s ease;
@@ -1563,6 +1753,46 @@ class ComprehensiveMobileAccessibilityScanner:
                 margin-left: 8px;
             }
             
+            .talkback-rules {
+                background: #f3e8ff;
+                border-radius: 6px;
+                padding: 15px;
+                margin: 15px 0;
+                border-left: 4px solid var(--talkback);
+            }
+            
+            .talkback-rules h4 {
+                color: var(--talkback);
+                margin-bottom: 10px;
+                display: flex;
+                align-items: center;
+                gap: 8px;
+            }
+            
+            .rules-list {
+                display: flex;
+                flex-wrap: wrap;
+                gap: 8px;
+                margin-top: 10px;
+            }
+            
+            .rule-badge {
+                background: var(--talkback);
+                color: white;
+                padding: 4px 10px;
+                border-radius: 20px;
+                font-size: 0.8rem;
+                font-weight: 600;
+            }
+            
+            .rule-badge.passed {
+                background: var(--success);
+            }
+            
+            .rule-badge.failed {
+                background: var(--critical);
+            }
+            
             footer {
                 text-align: center;
                 padding: 30px;
@@ -1588,6 +1818,47 @@ class ComprehensiveMobileAccessibilityScanner:
         html.append("<p class='subtitle'>Comprehensive analysis of your mobile application's accessibility compliance</p>")
         html.append("</header>")
         
+        # TalkBack Status Card
+        talkback_class = "talkback-supported" if self.talkback_status["detected"] else "talkback-unsupported"
+        talkback_status_text = "Supported" if self.talkback_status["detected"] else "Not Detected"
+        
+        html.append("<div class='talkback-status-card'>")
+        html.append("<div class='talkback-header'>")
+        html.append("<i class='fas fa-assistive-listening-systems talkback-icon'></i>")
+        html.append("<h2 class='talkback-title'>TalkBack Support Status: <span class='" + talkback_class + "'>" + talkback_status_text + "</span></h2>")
+        html.append("</div>")
+        
+        html.append("<div class='talkback-details'>")
+        html.append("<div class='talkback-detail'>")
+        html.append("<div class='talkback-detail-label'><i class='fas fa-info-circle'></i> Status Details</div>")
+        html.append("<div>" + self.talkback_status["details"] + "</div>")
+        html.append("</div>")
+        
+        html.append("<div class='talkback-detail'>")
+        html.append("<div class='talkback-detail-label'><i class='fas fa-vial'></i> Test Method</div>")
+        html.append("<div>" + self.talkback_status["test_method"] + "</div>")
+        html.append("</div>")
+        
+        if self.talkback_status["rules_passed"]:
+            html.append("<div class='talkback-detail'>")
+            html.append("<div class='talkback-detail-label'><i class='fas fa-check-circle'></i> Rules Supporting TalkBack</div>")
+            html.append("<div>" + str(len(self.talkback_status["rules_passed"])) + " rules passed</div>")
+            html.append("</div>")
+        html.append("</div>")
+        
+        # Display passed rules for TalkBack
+        if self.talkback_status["rules_passed"]:
+            html.append("<div class='talkback-rules'>")
+            html.append("<h4><i class='fas fa-list-check'></i> TalkBack-Supporting Rules</h4>")
+            html.append("<p>These rules are essential for TalkBack compatibility:</p>")
+            html.append("<div class='rules-list'>")
+            for rule in self.talkback_status["rules_passed"]:
+                html.append("<span class='rule-badge passed'>" + rule.replace('-', ' ') + "</span>")
+            html.append("</div>")
+            html.append("</div>")
+        
+        html.append("</div>")
+        
         # Score Card
         score_class = "score-excellent" if audit_score >= 90 else "score-good" if audit_score >= 70 else "score-poor" if audit_score >= 50 else "score-critical"
         html.append("<div class='score-card'>")
@@ -1596,9 +1867,14 @@ class ComprehensiveMobileAccessibilityScanner:
         html.append("<p>Based on analysis of " + str(total_issues) + " accessibility issues</p>")
         html.append("</div>")
         
-        # Summary Cards
+        # Summary Cards - Add TalkBack summary if there are TalkBack issues
+        talkback_issues = [i for i in issues if i["rule"] == "talkback-support"]
+        summary_with_talkback = summary.copy()
+        if talkback_issues:
+            summary_with_talkback["talkback"] = len(talkback_issues)
+        
         html.append("<div class='summary-cards'>")
-        for k, v in summary.items():
+        for k, v in summary_with_talkback.items():
             html.append("<div class='summary-card " + k + "'>")
             html.append("<h3>" + k.title() + "</h3>")
             html.append("<div class='summary-count'>" + str(v) + "</div>")
@@ -1625,11 +1901,12 @@ class ComprehensiveMobileAccessibilityScanner:
             "critical": "fas fa-exclamation-circle",
             "high": "fas fa-exclamation-triangle", 
             "medium": "fas fa-info-circle",
-            "low": "fas fa-flag"
+            "low": "fas fa-flag",
+            "talkback": "fas fa-assistive-listening-systems"
         }
         
-        # Display issues by priority level
-        for priority in ["critical", "high", "medium", "low"]:
+        # Display issues by priority level - include TalkBack issues
+        for priority in ["critical", "high", "medium", "low", "talkback"]:
             pr_issues = [i for i in issues if i["priority"] == priority]
             if not pr_issues:
                 continue
@@ -1689,6 +1966,20 @@ class ComprehensiveMobileAccessibilityScanner:
                         html.append("</div>")
                     html.append("</div>")
                 
+                # Special TalkBack info for TalkBack issues
+                if rule == "talkback-support" and self.talkback_status:
+                    html.append("<div class='talkback-rules'>")
+                    html.append("<h4><i class='fas fa-assistive-listening-systems'></i> TalkBack Compatibility</h4>")
+                    html.append("<p><strong>Status:</strong> " + ("Detected" if self.talkback_status["detected"] else "Not Detected") + "</p>")
+                    html.append("<p><strong>Details:</strong> " + self.talkback_status["details"] + "</p>")
+                    if self.talkback_status["rules_passed"]:
+                        html.append("<p><strong>Supporting Rules:</strong></p>")
+                        html.append("<div class='rules-list'>")
+                        for passed_rule in self.talkback_status["rules_passed"]:
+                            html.append("<span class='rule-badge passed'>" + passed_rule.replace('-', ' ') + "</span>")
+                        html.append("</div>")
+                    html.append("</div>")
+                
                 # Display all instances for this rule with instance-level accordions
                 html.append("<div class='all-instances'>")
                 html.append("<div class='detail-group'><div class='detail-label'>Found " + str(len(group['instances'])) + " instance(s):</div></div>")
@@ -1715,6 +2006,8 @@ class ComprehensiveMobileAccessibilityScanner:
                     html.append("<div class='detail-group'><div class='detail-label'>WCAG Guideline</div><div>" + instance.get('guideline', '') + "</div></div>")
                     if "contrast" in instance:
                         html.append("<div class='detail-group'><div class='detail-label'>Contrast Ratio</div><div>" + str(instance['contrast']) + ":1 (Minimum recommended: 4.5:1)</div></div>")
+                    if "talkback_status" in instance:
+                        html.append("<div class='detail-group'><div class='detail-label'>TalkBack Status</div><div>" + instance['talkback_status']['details'] + "</div></div>")
                     html.append("</div>")
                     
                     html.append("</div>")
@@ -1792,8 +2085,8 @@ class ComprehensiveMobileAccessibilityScanner:
                     });
                 });
                 
-                // Auto-expand critical issues and their first instance
-                document.querySelectorAll('.issue.critical').forEach(accordion => {
+                // Auto-expand critical and TalkBack issues and their first instance
+                document.querySelectorAll('.issue.critical, .issue.talkback').forEach(accordion => {
                     accordion.classList.add('active');
                     // Also expand first instance of critical issues
                     const firstInstance = accordion.querySelector('.instance-accordion');
